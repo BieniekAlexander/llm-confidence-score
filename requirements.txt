@@ -1,0 +1,12 @@
+accelerate
+datasets
+diffusers
+huggingface_hub
+ipykernel
+matplotlib
+pyarrow==15.0.2
+peft
+sentencepiece
+torch
+transformers>=4.38.0
+tqdm
