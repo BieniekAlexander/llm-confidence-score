@@ -2,7 +2,7 @@
 import torch
 from tqdm import tqdm
 from datasets import load_dataset
-from transformers import LlamaForCausalLM, LlamaTokenizer, pipeline
+from transformers import LlamaForCausalLM, LlamaTokenizer, pipeline, AutoTokenizer, AutoModelForQuestionAnswering
 import matplotlib.pyplot as plt
 
 
@@ -56,13 +56,15 @@ qa_model_name = "deepset/roberta-base-squad2"
 llama_model_name = "meta-llama/Llama-2-7b-chat-hf" 
 llama_model = LlamaForCausalLM.from_pretrained(llama_model_name, device_map=device)
 llama_tokenizer = LlamaTokenizer.from_pretrained(llama_model_name, device_map=device)
+qa_model = AutoModelForQuestionAnswering.from_pretrained(qa_model_name)
+qa_tokenizer = AutoTokenizer.from_pretrained(qa_model_name)
 
 # data
 NUM_RECORDS = 1000 # @param
 data = load_dataset("rajpurkar/squad_v2", split=f"train[:{NUM_RECORDS}]")
 
 
-# yes-no scores based on dataset ground-truths
+# yes-no scoring - ground-truth
 ground_truth_scores = []
 for i, row in tqdm(enumerate(data)):
     if len(row['answers']['text']) < 1: continue
@@ -76,10 +78,10 @@ for i, row in tqdm(enumerate(data)):
 plot_histogram(ground_truth_scores, "Histogram of Yes Scores Using Ground Truth Responses")
 
 
-# scoring - qa
+# yes-no scoring - qa model
 qa_scores = []
 for i, row in tqdm(enumerate(data)):
-    nlp = pipeline('question-answering', model=qa_model_name, tokenizer=qa_model_name)
+    nlp = pipeline('question-answering', model=qa_model, tokenizer=qa_tokenizer)
     QA_input = {'question': row["question"], 'context': row['context']}
     response = nlp(QA_input)
     prompt = get_yes_no_prompt(row['context'], row['question'], response)
@@ -90,4 +92,4 @@ for i, row in tqdm(enumerate(data)):
     yes_score = get_yes_score(outputs, input_length, llama_tokenizer)
     qa_scores.append(yes_score)
 
-plot_histogram(qa_scores, f"Histogram of Yes Scores Using Answers from {qa_model_name}")
+plot_histogram(qa_scores, f"Histogram of Yes Scores Using Answers from {qa_model_name.split('/')[-1]}")
