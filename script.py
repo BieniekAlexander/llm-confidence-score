@@ -2,7 +2,7 @@
 import torch
 from tqdm import tqdm
 from datasets import load_dataset
-from transformers import LlamaForCausalLM, LlamaTokenizer, pipeline, AutoModelForQuestionAnswering, AutoTokenizer
+from transformers import LlamaForCausalLM, LlamaTokenizer, pipeline
 import matplotlib.pyplot as plt
 
 
@@ -36,9 +36,10 @@ def get_yes_score(outputs, input_length, tokenizer):
     no_prob = next_token_dict.get("No", 0.)
     # 3. calculate and return yes/no confidence score
     yes_score = yes_prob / (yes_prob + no_prob) if yes_prob != 0 or no_prob != 0 else 0.5
-    return yes_score
+    return yes_score.item() if type(yes_score)==torch.Tensor else yes_score
 
 def plot_histogram(scores, title):
+    """Simple wrapper for generating a histogram from the input scores, saving the figure to a pdf based on the title"""
     plt.hist(scores, range=(0, 1.0), bins=50)
     plt.xlabel("Yes Score")
     plt.ylabel("Number of Questions")
@@ -47,35 +48,32 @@ def plot_histogram(scores, title):
     plt.clf()
 
 
-# models
+# models - @pram
+# NOTE: the original experiment uses "meta-llama/Llama-2-13b-chat-hf",
+# but here I'm using a smaller model due to GPU constraints of a2-highgpu-1g, which is the hardware available in our GCP instance
 device = "cuda" if torch.cuda.is_available() else "cpu"
-
-llama_model_name = "meta-llama/Llama-2-13b-chat-hf"
+qa_model_name = "deepset/roberta-base-squad2"
+llama_model_name = "meta-llama/Llama-2-7b-chat-hf" 
 llama_model = LlamaForCausalLM.from_pretrained(llama_model_name, device_map=device)
 llama_tokenizer = LlamaTokenizer.from_pretrained(llama_model_name, device_map=device)
 
-qa_model_name = "deepset/roberta-base-squad2"
-qa_model = AutoModelForQuestionAnswering.from_pretrained(qa_model_name)
-qa_tokenizer = AutoTokenizer.from_pretrained(qa_model_name)
-
-
 # data
-NUM_RECORDS = 10 # @param
+NUM_RECORDS = 1000 # @param
 data = load_dataset("rajpurkar/squad_v2", split=f"train[:{NUM_RECORDS}]")
 
 
-# scoring - llama
-accurate_scores = []
+# yes-no scores based on dataset ground-truths
+ground_truth_scores = []
 for i, row in tqdm(enumerate(data)):
-    if len(row['answers']['text']) < 1: break
+    if len(row['answers']['text']) < 1: continue
     prompt = get_yes_no_prompt(row['context'], row['question'], row['answers']['text'][0])
     input_ids = llama_tokenizer(prompt, return_tensors="pt").input_ids.to(device)
     input_length = input_ids.shape[1]
     outputs = llama_model.generate(input_ids, output_logits=True, return_dict_in_generate=True, max_new_tokens=5)
     yes_score = get_yes_score(outputs, input_length, llama_tokenizer)
-    accurate_scores.append(yes_score)
+    ground_truth_scores.append(yes_score)
 
-plot_histogram(accurate_scores, "Histogram of Yes Scores Correct Answers")
+plot_histogram(ground_truth_scores, "Histogram of Yes Scores Using Ground Truth Responses")
 
 
 # scoring - qa
@@ -86,9 +84,10 @@ for i, row in tqdm(enumerate(data)):
     response = nlp(QA_input)
     prompt = get_yes_no_prompt(row['context'], row['question'], response)
     input_ids = llama_tokenizer(prompt, return_tensors="pt").input_ids.to(device)
+    
     input_length = input_ids.shape[1]
     outputs = llama_model.generate(input_ids, output_logits=True, return_dict_in_generate=True, max_new_tokens=5)
     yes_score = get_yes_score(outputs, input_length, llama_tokenizer)
     qa_scores.append(yes_score)
 
-plot_histogram(qa_scores, "Histogram of Yes Scores Question Answers")
+plot_histogram(qa_scores, f"Histogram of Yes Scores Using Answers from {qa_model_name}")
